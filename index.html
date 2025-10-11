@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemverse - Prototype</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; background-color: #222; color: #fff; }
+        #gameCanvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background-color: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px;}
+        button, input { padding: 8px; font-size: 16px; margin-top: 5px; }
+        #chatLog { height: 150px; overflow-y: scroll; border: 1px solid #555; padding: 5px; margin-top: 10px; background-color: #333; }
+        #chatLog p { margin: 2px 0; padding: 2px; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <button id="connectWalletBtn">Connect Wallet</button>
+        <div id="walletStatus">Status: Disconnected</div>
+        <hr>
+        <input type="text" id="worldNameInput" placeholder="Enter World Name">
+        <button id="joinWorldBtn">Join World</button>
+        <div id="peerStatus">Peers: 0</div>
+        <hr>
+        <input type="text" id="chatInput" placeholder="Type message...">
+        <button id="sendChatBtn">Send</button>
+        <div id="chatLog"></div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script type="module">
+        import webconnect from 'https://cdn.jsdelivr.net/npm/webconnect@0.0.10/dist/esm/webconnect.js';
+
+        // --- UI Elements ---
+        const connectWalletBtn = document.getElementById('connectWalletBtn');
+        const walletStatusDiv = document.getElementById('walletStatus');
+        const joinWorldBtn = document.getElementById('joinWorldBtn');
+        const worldNameInput = document.getElementById('worldNameInput');
+        const chatInput = document.getElementById('chatInput');
+        const sendChatBtn = document.getElementById('sendChatBtn');
+        const peerStatusDiv = document.getElementById('peerStatus');
+        const chatLog = document.getElementById('chatLog');
+
+        // --- State Variables ---
+        let provider = getProvider();
+        let walletKey = null;
+        let p2pConnection = null;
+
+        // --- Wallet Connection Logic ---
+        function getProvider() {
+            if ('phantom' in window && window.phantom?.solana?.isPhantom) {
+                return window.phantom.solana;
+            }
+            if ('solana' in window && window.solana?.isPhantom) {
+                 return window.solana;
+            }
+            return null;
+        };
+
+        function handleConnected(publicKey) {
+            walletKey = publicKey;
+            const pubKeyString = publicKey.toString();
+            walletStatusDiv.innerText = `Connected: ${pubKeyString.substring(0, 4)}...${pubKeyString.substring(pubKeyString.length - 4)}`;
+            connectWalletBtn.style.display = 'none';
+        };
+
+        function handleDisconnected() {
+             walletKey = null;
+             walletStatusDiv.innerText = 'Status: Disconnected';
+             connectWalletBtn.style.display = 'block';
+        }
+
+        connectWalletBtn.addEventListener('click', async () => {
+            if (!provider) {
+                window.open('https://phantom.app/', '_blank');
+                return;
+            }
+            try {
+                const resp = await provider.connect();
+                handleConnected(resp.publicKey);
+            } catch (err) {
+                console.error("Wallet connection failed:", err);
+            }
+        });
+
+        // --- P2P Connection Logic (using webconnect) ---
+        function displayMessage(message, from = 'System') {
+            const p = document.createElement('p');
+            p.innerText = `[${from}]: ${message}`;
+            chatLog.appendChild(p);
+            chatLog.scrollTop = chatLog.scrollHeight; // Auto-scroll
+        }
+
+        joinWorldBtn.addEventListener('click', () => {
+            const worldName = worldNameInput.value.trim();
+            if (!worldName) {
+                alert('Please enter a world name.');
+                return;
+            }
+            if (p2pConnection) {
+                // Handle disconnecting from an old world if needed
+                p2pConnection.close();
+            }
+
+            console.log(`Initializing P2P for channel: ${worldName}`);
+            displayMessage(`Joining world: ${worldName}...`, 'System');
+
+            p2pConnection = webconnect({ channelName: worldName });
+
+            p2pConnection.onConnect((attr) => {
+                console.log('Peer connected:', attr.connectId);
+                updatePeerCount();
+                displayMessage(`A new peer has joined.`, 'System');
+            });
+
+            p2pConnection.onDisconnect((attr) => {
+                console.log('Peer disconnected:', attr.connectId);
+                updatePeerCount();
+                displayMessage(`A peer has left.`, 'System');
+            });
+
+            p2pConnection.onReceive((data, attr) => {
+                console.log('Received data:', data);
+                if (data.type === 'chat') {
+                    // Use a shortened version of the peer's public key as their name
+                    const peerName = attr.connectId.substring(0, 6);
+                    displayMessage(data.message, peerName);
+                }
+            });
+
+            // Initial connection status check
+            p2pConnection.getConnection(attr => updatePeerCount());
+        });
+
+        function updatePeerCount() {
+            if (!p2pConnection) return;
+            p2pConnection.getConnection(attr => {
+                // The count is yourself (1) + the number of other connections
+                const count = attr.connection.length + 1;
+                peerStatusDiv.innerText = `Peers: ${count}`;
+            });
+        }
+
+        sendChatBtn.addEventListener('click', () => {
+            const message = chatInput.value;
+            if (message && p2pConnection) {
+                displayMessage(message, 'You'); // Display your own message immediately
+                
+                // Broadcast the message to all peers
+                p2pConnection.Send({
+                    type: 'chat',
+                    message: message
+                }, { connectId: null });
+
+                chatInput.value = ''; // Clear the input
+            } else if (!p2pConnection) {
+                alert('You must join a world before chatting!');
+            }
+        });
+
+        // Auto-connect if wallet is already trusted
+        if (provider?.isConnected) {
+            provider.connect({ onlyIfTrusted: true })
+                .then(({ publicKey }) => handleConnected(publicKey))
+                .catch(err => console.log("Auto-connect failed. User interaction needed."));
+        }
+
+    </script>
+</body>
+</html>
