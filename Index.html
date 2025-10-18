@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemverse V1.5 - Alpha Build</title>
+    <title>Gemverse V2.8 - Alpha Build (Physics Worker)</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
         :root {
             --panel-bg: rgba(13, 22, 32, 0.85);
             --accent-color: #ffd166;
             --text-color: #eaf6ff;
+            --energy-color: #4ade80;
         }
         body {
             margin: 0;
@@ -23,12 +24,14 @@
             position: fixed;
             inset: 0;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             z-index: 300;
             background: #071226;
             color: var(--accent-color);
             font-size: 24px;
+            transition: opacity 0.5s ease-out;
         }
         #hud {
             position: fixed;
@@ -78,129 +81,61 @@
             top: 9px;
             left: -9px;
         }
-        #hotbar {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 8px;
-            background: var(--panel-bg);
-            padding: 8px;
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            z-index: 100;
-        }
-        .hot-slot {
-            width: 50px;
-            height: 50px;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            text-align: center;
-            background-size: cover;
-            background-position: center;
-        }
-        .hot-slot.active {
-            border-color: var(--accent-color);
-            box-shadow: 0 0 15px var(--accent-color);
-        }
-        .message {
-             position: fixed;
-             top: 150px;
-             left: 50%;
-             transform: translateX(-50%);
-             background: var(--panel-bg);
-             padding: 10px 20px;
-             border-radius: 8px;
-             z-index: 200;
-             font-size: 18px;
-             animation: fadeOut 3s forwards;
-        }
-        @keyframes fadeOut {
-            0% { opacity: 1; top: 150px; }
-            80% { opacity: 1; top: 140px; }
-            100% { opacity: 0; top: 130px; }
-        }
     </style>
 </head>
 <body>
-    <div id="loadingOverlay">Loading Gemverse...</div>
+    <div id="loadingOverlay">Initializing Physics...</div>
 
     <div id="hud" style="display: none;">
-        <h3>Gemverse V1.5</h3>
-        <div><span class="key">Status:</span> <span id="loginStatus">Not Logged In</span></div>
+        <h3>Gemverse V2.8</h3>
         <div><span class="key">Position:</span> <span id="coords">(0, 0, 0)</span></div>
-        <hr style="border-color: rgba(255,255,255,0.1); margin: 10px 0;">
-        <div><span class="key">Block Height:</span> <span id="blockHeight">0</span></div>
-        <div><span class="key">Pending Txs:</span> <span id="pendingTxs">0</span></div>
-        <button id="vrButton" disabled>Enter VR</button>
-        <hr style="border-color: rgba(255,255,255,0.1); margin: 10px 0;">
         <div style="font-size: 12px; opacity: 0.7;">
             LMB/E: Place | RMB/Q: Break<br>
-            WASD: Move | Arrows/Mouse: Look<br>
-            Space: Jump | Scroll: Select
+            WASD: Move | Mouse: Look<br>
+            Space: Jump
         </div>
     </div>
 
-    <div id="hotbar" style="display: none;"></div>
     <div id="crosshair"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script type="module">
-        // --- GEMVERSE ENGINE V1.5 ---
-        // (Blockchain, Block, Transaction, Login classes are unchanged)
-        async function calculateHash(data) { const json = JSON.stringify(data); const buffer = new TextEncoder().encode(json); const hashBuffer = await crypto.subtle.digest('SHA-256', buffer); const hashArray = Array.from(new Uint8Array(hashBuffer)); return hashArray.map(b => b.toString(16).padStart(2, '0')).join(''); }
-        class Transaction { constructor(publicKey, actionType, actionData) { this.timestamp = Date.now(); this.publicKey = publicKey; this.action = { type: actionType, data: actionData }; this.signature = null; this.transaction_id = null; } async signTransaction(signingFunction) { const hashToSign = await calculateHash({ timestamp: this.timestamp, publicKey: this.publicKey, action: this.action }); this.signature = await signingFunction(hashToSign); this.transaction_id = await calculateHash(this); } }
-        class Block { constructor(block_height, previous_block_hash, transactions, validator) { this.block_height = block_height; this.timestamp = Date.now(); this.previous_block_hash = previous_block_hash; this.transactions = transactions; this.validator = validator; this.nonce = 0; this.block_hash = null; } async calculateBlockHash() { const dataToHash = { ...this, block_hash: null }; return await calculateHash(dataToHash); } async mineBlock(difficulty) { const target = '0'.repeat(difficulty); while (true) { const hash = await this.calculateBlockHash(); if (hash.substring(0, difficulty) === target) { this.block_hash = hash; console.log(`Block Mined! Hash: ${this.block_hash}`); return; } this.nonce++; } } }
-        class Blockchain { constructor() { this.chain = []; this.pendingTransactions = []; } async initialize() { const genesisBlock = new Block(0, "0", [], "GENESIS"); await genesisBlock.mineBlock(2); this.chain.push(genesisBlock); } getLatestBlock() { return this.chain[this.chain.length - 1]; } async addBlock(newBlock) { newBlock.previous_block_hash = this.getLatestBlock().block_hash; await newBlock.mineBlock(4); this.chain.push(newBlock); this.pendingTransactions = []; } }
-        const loginSystem = { playerKeys: null, async login() { this.playerKeys = { publicKey: "Player_" + Math.random().toString(36).substr(2, 9), sign: async (data) => `signed(${await calculateHash(data)})` }; console.log("Login successful! PK:", this.playerKeys.publicKey); return this.playerKeys; } };
-
+    <script>
         // --- GAME SETUP ---
-        let scene, camera, renderer, player, gemverseChain, spawnPoint;
+        let scene, camera, renderer, player, spawnPoint;
         let world = new Map();
-        let ghostPlaceBlocks = new Map();
-        let ghostBreakBlocks = new Map();
         let blockMeshes = new Map();
         let highlightMesh;
         const keys = {};
 
-        const BLOCK_TYPES = { 1: { name: 'Grass' }, 2: { name: 'Stone' }, };
-        let selectedBlockId = 1;
+        const WORLD_SIZE = 50; const HALF_WORLD_SIZE = WORLD_SIZE / 2;
+        const BLOCK_TYPES = { 1: { name: 'Grass', color: '#3fb34f' }, 2: { name: 'Stone', color: '#9aa0a6' }, };
         let textures = {};
-        const MAX_FALL_SPEED = 1.0; // Terminal velocity
-
+        
+        const physicsWorker = new Worker('physics.js');
+        
         // --- CORE FUNCTIONS ---
         async function init() {
-            await loginSystem.login();
-            gemverseChain = new Blockchain();
-            await gemverseChain.initialize();
-            
-            textures[1] = createProceduralTexture('#3fb34f', '#7a4f29');
-            textures[2] = createProceduralTexture('#9aa0a6', '#6b7280');
+            textures[1] = createProceduralTexture(BLOCK_TYPES[1].color, '#7a4f29');
+            textures[2] = createProceduralTexture(BLOCK_TYPES[2].color, '#6b7280');
 
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000); // Increased far plane for skydiving
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
-
-            const loader = new THREE.CubeTextureLoader();
-            const skyTexture = loader.setPath('https://threejs.org/examples/textures/cube/MilkyWay/').load(['dark-s_px.jpg', 'dark-s_nx.jpg', 'dark-s_py.jpg', 'dark-s_ny.jpg', 'dark-s_pz.jpg', 'dark-s_nz.jpg']);
-            scene.background = skyTexture;
 
             scene.add(new THREE.AmbientLight(0xffffff, 0.6));
             const sun = new THREE.DirectionalLight(0xffffff, 0.8);
             sun.position.set(50, 50, 50);
             scene.add(sun);
             
-            spawnPoint = new THREE.Vector3(8, 5, 8);
-            player = { position: spawnPoint.clone(), velocity: new THREE.Vector3(), onGround: false, height: 1.8, yaw: 0, pitch: 0, hasBeenWarped: false };
+            spawnPoint = new THREE.Vector3(HALF_WORLD_SIZE, 1.5, HALF_WORLD_SIZE);
+            player = { 
+                position: new THREE.Vector3().copy(spawnPoint), 
+                quaternion: new THREE.Quaternion(),
+                yaw: 0, 
+                pitch: 0, 
+            };
             camera.position.copy(player.position);
             
             const highlightGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.01, 1.01, 1.01));
@@ -209,182 +144,102 @@
             highlightMesh.visible = false;
             scene.add(highlightMesh);
 
-            for (let x = 0; x < 16; x++) { for (let z = 0; z < 16; z++) { addVoxel(x, 0, z, 2); addVoxel(x, 1, z, 1); } }
-            
-            initVR();
+            createWorldCube();
             setupEventListeners();
-            document.getElementById('hud').style.display = 'block';
-            document.getElementById('hotbar').style.display = 'flex';
-            document.getElementById('loadingOverlay').style.display = 'none';
-            document.getElementById('loginStatus').textContent = `Logged In: ${loginSystem.playerKeys.publicKey.slice(0, 18)}...`;
-            updateHotbar();
             
-            setInterval(minePendingTransactions, 5000);
+            // --- Initialize Physics Worker ---
+            const worldDataForWorker = Array.from(world.entries()).map(([key, id]) => ({ key, id }));
+            physicsWorker.postMessage({
+                type: 'init',
+                data: {
+                    player: { 
+                        position: player.position,
+                        height: 1.8, width: 0.8,
+                    },
+                    world: worldDataForWorker
+                }
+            });
+            
+            physicsWorker.onmessage = (e) => {
+                const { type, position, quaternion, onGround } = e.data;
+                if (type === 'state_update') {
+                    player.position.copy(position);
+                    player.quaternion.copy(quaternion);
+                }
+            };
+            
+            document.getElementById('loadingOverlay').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+
             renderer.setAnimationLoop(animate);
         }
 
-        function createProceduralTexture(c1, c2) { const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16; const ctx = canvas.getContext('2d'); ctx.fillStyle = c1; ctx.fillRect(0, 0, 16, 16); for (let i = 0; i < 40; i++) { ctx.fillStyle = c2; ctx.globalAlpha = Math.random() * 0.5 + 0.2; ctx.fillRect(Math.random() * 16, Math.random() * 16, 2, 2); } const texture = new THREE.CanvasTexture(canvas); texture.magFilter = THREE.NearestFilter; texture.minFilter = THREE.NearestFilter; return texture; }
-
-        async function minePendingTransactions() {
-            if (gemverseChain.pendingTransactions.length === 0) return;
-            const block = new Block(gemverseChain.getLatestBlock().block_height + 1, gemverseChain.getLatestBlock().block_hash, gemverseChain.pendingTransactions, "Validator");
-            await gemverseChain.addBlock(block);
-            for (const tx of block.transactions) {
-                const { x, y, z, blockId } = tx.action.data.position;
-                const key = `${x},${y},${z}`;
-                if (tx.action.type === 'PLACE_BLOCK') { if (ghostPlaceBlocks.has(key)) { scene.remove(ghostPlaceBlocks.get(key)); ghostPlaceBlocks.delete(key); } addVoxel(x, y, z, blockId); } 
-                else if (tx.action.type === 'BREAK_BLOCK') { if (ghostBreakBlocks.has(key)) { scene.remove(ghostBreakBlocks.get(key)); ghostBreakBlocks.delete(key); } }
-            }
-        }
-        
-        function addVoxel(x, y, z, blockId, isGhost = false) {
-            const key = `${x},${y},${z}`;
-            if (world.has(key) && !isGhost) return;
-            const geo = new THREE.BoxGeometry(1, 1, 1);
-            const mat = new THREE.MeshLambertMaterial({ map: textures[blockId] });
-            if (isGhost) { mat.transparent = true; mat.opacity = 0.5; }
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
-            scene.add(mesh);
-            if (isGhost) { ghostPlaceBlocks.set(key, mesh); } else { world.set(key, blockId); blockMeshes.set(key, mesh); }
+        function createWorldCube() {
+            const geo = new THREE.BoxGeometry(WORLD_SIZE, WORLD_SIZE, WORLD_SIZE);
+            const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.1 });
+            const cube = new THREE.Mesh(geo, mat);
+            cube.position.set(HALF_WORLD_SIZE, HALF_WORLD_SIZE, HALF_WORLD_SIZE);
+            scene.add(cube);
+            for(let i = 0; i < WORLD_SIZE; i++) { for(let j = 0; j < WORLD_SIZE; j++) { addVoxel(i, 0, j, 2); addVoxel(i, WORLD_SIZE - 1, j, 2); addVoxel(0, i, j, 1); addVoxel(WORLD_SIZE - 1, i, j, 1); addVoxel(i, j, 0, 1); addVoxel(i, j, WORLD_SIZE - 1, 1); } }
         }
 
-        function removeVoxel(x, y, z) { const key = `${x},${y},${z}`; if (world.has(key)) { scene.remove(blockMeshes.get(key)); blockMeshes.get(key).geometry.dispose(); blockMeshes.get(key).material.dispose(); blockMeshes.delete(key); world.delete(key); } }
+        function createProceduralTexture(c1, c2) { const c = document.createElement('canvas'); c.width=16; c.height=16; const ctx = c.getContext('2d'); ctx.fillStyle=c1; ctx.fillRect(0,0,16,16); for(let i=0;i<40;i++) { ctx.fillStyle=c2; ctx.globalAlpha=Math.random()*0.5+0.2; ctx.fillRect(Math.random()*16,Math.random()*16,2,2); } const t=new THREE.CanvasTexture(c); t.magFilter=THREE.NearestFilter; t.minFilter=THREE.NearestFilter; return t; }
         
-        function getTargetedBlock() { const raycaster = new THREE.Raycaster(camera.position, camera.getWorldDirection(new THREE.Vector3())); raycaster.far = 5; const targets = [...blockMeshes.values(), ...ghostPlaceBlocks.values()]; const intersects = raycaster.intersectObjects(targets); return intersects.length > 0 ? intersects[0] : null; }
-
-        function animate() { updatePlayer(); updateHighlight(); updateHUD(); renderer.render(scene, camera); }
-
-        function updatePlayer() {
-            player.velocity.y -= 0.008;
-            player.velocity.y = Math.max(player.velocity.y, -MAX_FALL_SPEED); // Apply terminal velocity
-
-            const speed = 0.05, rotSpeed = 0.02;
+        function addVoxel(x, y, z, blockId) { const key = `${x},${y},${z}`; const geo = new THREE.BoxGeometry(1, 1, 1); const mat = new THREE.MeshLambertMaterial({ map: textures[blockId] }); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(x + 0.5, y + 0.5, z + 0.5); scene.add(mesh); world.set(key, blockId); blockMeshes.set(key, mesh); }
+        
+        function animate() {
+            updateCameraAndInput();
+            updateHighlight();
+            updateHUD();
+            renderer.render(scene, camera);
+        }
+        
+        function updateCameraAndInput() {
+            const rotSpeed = 0.02;
             if (keys['arrowleft']) player.yaw += rotSpeed;
             if (keys['arrowright']) player.yaw -= rotSpeed;
             if (keys['arrowup']) player.pitch += rotSpeed;
             if (keys['arrowdown']) player.pitch -= rotSpeed;
             player.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, player.pitch));
-            camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
-
-            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-            if (keys['w']) player.position.addScaledVector(forward, speed);
-            if (keys['s']) player.position.addScaledVector(forward, -speed);
-            if (keys['a']) player.position.addScaledVector(right, -speed);
-            if (keys['d']) player.position.addScaledVector(right, speed);
             
-            player.position.add(player.velocity);
-
-            const feet = player.position.clone().setY(player.position.y - player.height / 2);
-            const feetBlockY = Math.floor(feet.y);
-            const feetBlockKey = `${Math.floor(feet.x)},${feetBlockY},${Math.floor(feet.z)}`;
+            const lookQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ'));
             
-            if (world.has(feetBlockKey)) { 
-                player.velocity.y = Math.max(0, player.velocity.y); 
-                player.position.y = feetBlockY + 1 + player.height / 2; 
-                player.onGround = true; 
-                if (player.hasBeenWarped) { // Safely landed after a warp
-                    player.hasBeenWarped = false;
-                    showMessage("Safe Landing!");
-                }
-            } else { player.onGround = false; }
-            
-            // --- COSMIC WARNING SYSTEM ---
-            if (player.position.y < -200) {
-                if (player.hasBeenWarped) {
-                    handlePlayerDeath();
-                } else {
-                    showMessage("Cosmic Warning!");
-                    player.position.y += 1000; // Warp up
-                    player.velocity.y = 0; // Reset velocity to start skydive
-                    player.hasBeenWarped = true;
-                }
-            }
-
             camera.position.copy(player.position);
-        }
-        
-        function handlePlayerDeath(){
-            showMessage("You have fallen into the void. Respawning...");
-            player.position.copy(spawnPoint);
-            player.velocity.set(0,0,0);
-            player.hasBeenWarped = false;
+            camera.quaternion.copy(player.quaternion).multiply(lookQuaternion);
         }
 
-        function showMessage(text) {
-            const msg = document.createElement('div');
-            msg.className = 'message';
-            msg.textContent = text;
-            document.body.appendChild(msg);
-            setTimeout(() => msg.remove(), 3000);
-        }
-
-        function updateHighlight() { const intersect = getTargetedBlock(); if(intersect) { highlightMesh.position.copy(intersect.object.position); highlightMesh.visible = true; } else { highlightMesh.visible = false; } }
+        function showMessage(text) { const msg = document.createElement('div'); msg.className = 'message'; msg.textContent = text; document.body.appendChild(msg); setTimeout(() => msg.remove(), 3000); }
+        function updateHighlight() { /* ... */ }
 
         function setupEventListeners() {
-            document.addEventListener('keydown', (e) => { const key = e.key.toLowerCase(); keys[key] = true; if(key === ' ' && player.onGround) player.velocity.y = 0.15; if(key === 'q') { const i = getTargetedBlock(); if(i) { const p = i.object.position.clone().subScalar(0.5); handleBreakBlock(p.x, p.y, p.z); }} if(key === 'e') { const i = getTargetedBlock(); if(i) { const p = i.object.position.clone().add(i.face.normal).subScalar(0.5); handlePlaceBlock(p.x, p.y, p.z, selectedBlockId); }} });
-            document.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+            document.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                if(!keys[key]) {
+                    keys[key] = true;
+                    physicsWorker.postMessage({ type: 'input', data: { key, pressed: true }});
+                }
+            });
+            document.addEventListener('keyup', (e) => {
+                const key = e.key.toLowerCase();
+                keys[key] = false;
+                physicsWorker.postMessage({ type: 'input', data: { key, pressed: false }});
+            });
+            
             renderer.domElement.addEventListener('click', () => { renderer.domElement.requestPointerLock().catch(e => {}); });
             document.addEventListener('pointerlockchange', () => { document.getElementById('crosshair').style.display = document.pointerLockElement === renderer.domElement ? 'block' : 'none'; });
-            document.addEventListener('mousemove', (e) => { if(document.pointerLockElement !== renderer.domElement) return; player.yaw -= e.movementX * 0.002; player.pitch -= e.movementY * 0.002; });
-            document.addEventListener('mousedown', (e) => { if (document.pointerLockElement !== renderer.domElement) return; const intersect = getTargetedBlock(); if (intersect) { if (e.button === 2) { const pos = intersect.object.position.clone().subScalar(0.5); handleBreakBlock(pos.x, pos.y, pos.z); } else if (e.button === 0) { const pos = intersect.object.position.clone().add(intersect.face.normal).subScalar(0.5); handlePlaceBlock(pos.x, pos.y, pos.z, selectedBlockId); } } });
-            window.addEventListener('wheel', (e) => { selectedBlockId = selectedBlockId === 1 ? 2 : 1; updateHotbar(); });
+            
+            document.addEventListener('mousemove', (e) => {
+                if(document.pointerLockElement !== renderer.domElement) return;
+                player.yaw -= e.movementX * 0.002;
+                player.pitch -= e.movementY * 0.002;
+            });
             window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
         }
         
-        async function handlePlaceBlock(x, y, z, blockId){ if (!loginSystem.playerKeys) return; const key = `${x},${y},${z}`; if(world.has(key) || ghostPlaceBlocks.has(key) || ghostBreakBlocks.has(key)) return; addVoxel(x, y, z, blockId, true); const actionData = { position: { x, y, z, blockId } }; const tx = new Transaction(loginSystem.playerKeys.publicKey, "PLACE_BLOCK", actionData); await tx.signTransaction(loginSystem.playerKeys.sign); gemverseChain.pendingTransactions.push(tx); }
-        async function handleBreakBlock(x, y, z){
-            if (!loginSystem.playerKeys) return;
-            const key = `${x},${y},${z}`;
-            if(!world.has(key) || ghostBreakBlocks.has(key)) return;
-
-            const mesh = blockMeshes.get(key);
-            mesh.material.transparent = true;
-            mesh.material.opacity = 0.3;
-            const wireframe = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }));
-            wireframe.position.copy(mesh.position);
-            scene.add(wireframe); // Add wireframe to scene to be visible
-
-            ghostBreakBlocks.set(key, wireframe); // Store wireframe to remove later
-            blockMeshes.get(key).visible = false; // Hide original mesh
-            
-            world.delete(key);
-            
-            const actionData = { position: { x, y, z } };
-            const tx = new Transaction(loginSystem.playerKeys.publicKey, "BREAK_BLOCK", actionData);
-            await tx.signTransaction(loginSystem.playerKeys.sign);
-            gemverseChain.pendingTransactions.push(tx);
+        function updateHUD() {
+            document.getElementById('coords').textContent = `(${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)})`; 
         }
-
-        function updateHotbar() {
-            const hotbar = document.getElementById('hotbar'); hotbar.innerHTML = '';
-            Object.keys(BLOCK_TYPES).forEach(id => {
-                const slot = document.createElement('div'); slot.className = 'hot-slot'; const blockId = parseInt(id);
-                slot.textContent = BLOCK_TYPES[blockId].name; slot.style.backgroundImage = `url(${textures[blockId].image.toDataURL()})`;
-                if (blockId === selectedBlockId) slot.classList.add('active');
-                slot.onclick = () => { selectedBlockId = blockId; updateHotbar(); }; hotbar.appendChild(slot);
-            });
-        }
-        function updateHUD() { document.getElementById('coords').textContent = `(${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)})`; document.getElementById('blockHeight').textContent = gemverseChain.getLatestBlock().block_height; document.getElementById('pendingTxs').textContent = gemverseChain.pendingTransactions.length; }
         
-        function initVR(){
-            const vrButton = document.getElementById('vrButton');
-            if (navigator.xr) {
-                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
-                    if (supported) {
-                        vrButton.disabled = false; vrButton.textContent = 'Enter VR';
-                        vrButton.onclick = () => {
-                            if (renderer.xr.isPresenting) { renderer.xr.getSession().end(); } 
-                            else { navigator.xr.requestSession('immersive-vr').then((session) => { renderer.xr.setSession(session); }); }
-                        };
-                        renderer.xr.addEventListener('sessionstart', () => vrButton.textContent = 'Exit VR');
-                        renderer.xr.addEventListener('sessionend', () => vrButton.textContent = 'Enter VR');
-                    } else { vrButton.textContent = 'VR Not Supported'; }
-                });
-            } else { vrButton.textContent = 'WebXR Not Available'; }
-        }
-
         // --- START ---
         init();
     </script>
