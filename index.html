@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemverse - Zero G Force Jump</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: sans-serif; }
+        #hud { position: absolute; top: 10px; left: 10px; pointer-events: none; user-select: none; }
+        #instructions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; transition: opacity 0.5s; user-select: none; }
+        .hidden { opacity: 0; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: rgba(255,255,255,0.8); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        Gravity: <span id="grav-display">DOWN</span><br>
+        WASD to Move | SPACE to Jump | F to Force Jump (Aim at surface)
+    </div>
+    <div id="instructions">
+        <h1>Gemverse</h1>
+        <p>Click to Start</p>
+    </div>
+    <div id="crosshair"></div>
+
+    <!-- Classic Scripts for file:// compatibility -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.iife.min.js"></script>
+
+    <script>
+        // --- Configuration ---
+        const CONFIG = {
+            moveSpeed: 5,
+            jumpForce: 5,
+            gravityStrength: 9.8,
+            forceJumpImpulse: 20, // Stronger launch
+            fov: 75
+        };
+
+        // --- Globals ---
+        let scene, camera, renderer;
+        let world, physicsBody;
+        let physicsMaterial;
+        let lastTime = 0;
+        let input = { w: false, a: false, s: false, d: false, space: false, f: false };
+        let isLocked = false;
+
+        // Player State
+        const player = {
+            height: 1.8,
+            width: 0.6,
+            onGround: false,
+            gravity: new THREE.Vector3(0, -1, 0), // Direction of gravity
+            up: new THREE.Vector3(0, 1, 0),       // Current Up direction
+            quaternion: new THREE.Quaternion(),   // Player rotation (Base)
+            yaw: 0,
+            pitch: 0
+        };
+
+        // Helper vectors
+        const _raycaster = new THREE.Raycaster();
+
+        init();
+        animate(0);
+
+        function init() {
+            // Visual Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111);
+            scene.fog = new THREE.Fog(0x111111, 10, 60);
+
+            camera = new THREE.PerspectiveCamera(CONFIG.fov, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 50, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.left = -30;
+            dirLight.shadow.camera.right = 30;
+            dirLight.shadow.camera.top = 30;
+            dirLight.shadow.camera.bottom = -30;
+            scene.add(dirLight);
+
+            // Physics Setup
+            world = new CANNON.World();
+            world.gravity.set(0, 0, 0); // Manual gravity
+            world.solver.iterations = 10;
+
+            physicsMaterial = new CANNON.Material('physics');
+            const physicsContactMaterial = new CANNON.ContactMaterial(physicsMaterial, physicsMaterial, {
+                friction: 0.1,
+                restitution: 0.0
+            });
+            world.addContactMaterial(physicsContactMaterial);
+
+            // Level Generation
+            createLevel();
+
+            // Player Setup
+            const playerShape = new CANNON.Box(new CANNON.Vec3(player.width/2, player.height/2, player.width/2));
+            physicsBody = new CANNON.Body({
+                mass: 60,
+                shape: playerShape,
+                material: physicsMaterial,
+                fixedRotation: true,
+                position: new CANNON.Vec3(0, 5, 0)
+            });
+            physicsBody.linearDamping = 0.95; // High damping for non-sliding movement
+            world.addBody(physicsBody);
+
+            player.up.set(0, 1, 0);
+            player.gravity.set(0, -1, 0);
+
+            // Events
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseDown);
+            document.addEventListener('mousemove', onMouseMove);
+        }
+
+        function createLevel() {
+            // Main Room Floor
+            createBox(0, -1, 0, 30, 2, 30, 0x444444);
+
+            // Walls for walking on
+            createBox(0, 15, -16, 30, 30, 2, 0xAA4444); // Back Wall (Z-)
+            createBox(0, 15, 16, 30, 30, 2, 0x4444AA); // Front Wall (Z+)
+            createBox(-16, 15, 0, 2, 30, 30, 0x44AA44); // Left Wall (X-)
+            createBox(16, 15, 0, 2, 30, 30, 0xAAAA44); // Right Wall (X+)
+            createBox(0, 31, 0, 30, 2, 30, 0x888888); // Ceiling
+
+            // Obstacles
+            createBox(-8, 2, -8, 4, 4, 4, 0xFF0000);
+            createBox(8, 4, 8, 4, 8, 4, 0x00FF00);
+            createBox(0, 10, 0, 5, 1, 5, 0x0000FF); // Floating platform
+        }
+
+        function createBox(x, y, z, w, h, d, color) {
+            const geometry = new THREE.BoxGeometry(w, h, d);
+            const material = new THREE.MeshLambertMaterial({ color: color });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+            const body = new CANNON.Body({
+                mass: 0,
+                shape: shape,
+                material: physicsMaterial,
+                position: new CANNON.Vec3(x, y, z)
+            });
+            world.addBody(body);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseDown() {
+            if (!isLocked) {
+                document.body.requestPointerLock();
+            }
+        }
+
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = document.pointerLockElement === document.body;
+            document.getElementById('instructions').classList.toggle('hidden', isLocked);
+        });
+
+        function onKeyDown(e) {
+            const key = e.code;
+            switch(key) {
+                case 'KeyW': input.w = true; break;
+                case 'KeyA': input.a = true; break;
+                case 'KeyS': input.s = true; break;
+                case 'KeyD': input.d = true; break;
+                case 'Space': input.space = true; if(isLocked) attemptJump(); break;
+                case 'KeyF': input.f = true; if(isLocked) attemptForceJump(); break;
+            }
+        }
+
+        function onKeyUp(e) {
+            const key = e.code;
+            switch(key) {
+                case 'KeyW': input.w = false; break;
+                case 'KeyA': input.a = false; break;
+                case 'KeyS': input.s = false; break;
+                case 'KeyD': input.d = false; break;
+                case 'Space': input.space = false; break;
+                case 'KeyF': input.f = false; break;
+            }
+        }
+
+        function onMouseMove(e) {
+            if (!isLocked) return;
+            const sensitivity = 0.002;
+            player.yaw -= e.movementX * sensitivity;
+            player.pitch -= e.movementY * sensitivity;
+            player.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, player.pitch));
+        }
+
+        function attemptJump() {
+            if (player.onGround) {
+                const jumpImpulse = new CANNON.Vec3();
+                jumpImpulse.copy(player.up).scale(CONFIG.jumpForce * physicsBody.mass, jumpImpulse);
+                physicsBody.applyImpulse(jumpImpulse, physicsBody.position);
+            }
+        }
+
+        function attemptForceJump() {
+            _raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = _raycaster.intersectObjects(scene.children);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                if (hit.distance < 100) {
+                    // Calculate new gravity direction (opposite to surface normal)
+                    const targetNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+
+                    // Launch player towards the point
+                    const launchDir = new THREE.Vector3().subVectors(hit.point, camera.position).normalize();
+                    const launchImpulse = new CANNON.Vec3(launchDir.x, launchDir.y, launchDir.z).scale(CONFIG.forceJumpImpulse * physicsBody.mass);
+
+                    // Reset velocity to prevent carrying old momentum weirdly
+                    physicsBody.velocity.set(0, 0, 0);
+                    physicsBody.applyImpulse(launchImpulse, physicsBody.position);
+
+                    // Update State
+                    player.gravity.copy(targetNormal).negate();
+                    player.up.copy(targetNormal);
+
+                    // Update UI
+                    document.getElementById('grav-display').innerText = `Vector(${player.gravity.x.toFixed(1)}, ${player.gravity.y.toFixed(1)}, ${player.gravity.z.toFixed(1)})`;
+                }
+            }
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            const dt = (time - lastTime) / 1000;
+            lastTime = time;
+            if (dt > 0.1 || dt <= 0) return;
+
+            // 1. Apply Physics Forces
+            const gravityForce = new CANNON.Vec3(
+                player.gravity.x * CONFIG.gravityStrength * physicsBody.mass,
+                player.gravity.y * CONFIG.gravityStrength * physicsBody.mass,
+                player.gravity.z * CONFIG.gravityStrength * physicsBody.mass
+            );
+            physicsBody.applyForce(gravityForce, physicsBody.position);
+
+            // 2. Step Physics
+            world.step(1/60, dt, 3);
+
+            // 3. Update Player Rotation & Controls
+            updatePlayerState(dt);
+
+            // 4. Ground Check
+            const rayFrom = new CANNON.Vec3().copy(physicsBody.position);
+            const rayTo = new CANNON.Vec3().copy(player.gravity).scale(player.height/2 + 0.2).vadd(rayFrom);
+            const result = new CANNON.RaycastResult();
+            world.raycastClosest(rayFrom, rayTo, {}, result);
+            player.onGround = result.hasHit;
+
+            // 5. Update Camera
+            const bodyPos = new THREE.Vector3(physicsBody.position.x, physicsBody.position.y, physicsBody.position.z);
+            const lookQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ'));
+            const finalQ = player.quaternion.clone().multiply(lookQ);
+
+            camera.quaternion.copy(finalQ);
+
+            const eyeOffset = player.up.clone().multiplyScalar(0.7);
+            camera.position.copy(bodyPos).add(eyeOffset);
+
+            renderer.render(scene, camera);
+        }
+
+        function updatePlayerState(dt) {
+            // Smoothly align player base rotation to player.up
+            const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(player.quaternion);
+            const targetUp = player.up;
+            const correctionQ = new THREE.Quaternion().setFromUnitVectors(currentUp, targetUp);
+
+            if (correctionQ.angleTo(new THREE.Quaternion()) > 0.001) {
+                // Slerp for smoothness
+                const targetQ = correctionQ.multiply(player.quaternion);
+                player.quaternion.slerp(targetQ, 5 * dt);
+            }
+
+            // Movement
+            if (isLocked) {
+                 const moveVec = new THREE.Vector3();
+                 if (input.w) moveVec.z -= 1;
+                 if (input.s) moveVec.z += 1;
+                 if (input.a) moveVec.x -= 1;
+                 if (input.d) moveVec.x += 1;
+
+                 if (moveVec.lengthSq() > 0) {
+                     moveVec.normalize();
+
+                     // Transform input (relative to look) to world space
+                     const lookQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ'));
+                     const globalLookQ = player.quaternion.clone().multiply(lookQ);
+                     const worldMove = moveVec.applyQuaternion(globalLookQ);
+
+                     // Project onto movement plane (perpendicular to UP)
+                     const upProject = worldMove.clone().projectOnVector(player.up);
+                     worldMove.sub(upProject).normalize();
+
+                     const force = new CANNON.Vec3(worldMove.x, worldMove.y, worldMove.z).scale(CONFIG.moveSpeed * physicsBody.mass * 5);
+                     physicsBody.applyForce(force, physicsBody.position);
+                 }
+            }
+        }
+    </script>
+</body>
+</html>
